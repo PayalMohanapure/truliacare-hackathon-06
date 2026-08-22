@@ -1,0 +1,358 @@
+PHASE 1 — BLUEPRINT ONLY
+Six documents below. No repo scaffolding, no code files, no commands run. Reply BUILD when you want implementation.
+
+Three decisions I locked that the brief left open — flagged here so nobody asks at minute 40:
+
+X-User-Id is the sole source of employee_id on POST /api/requests. No employee_id in the request body. One source of truth, zero mismatch bugs.
+The frontend never does date math on created_at. Naive TIMESTAMP strings get parsed as local time by JS and will silently shift the countdown by your UTC offset. The backend ships age_minutes, minutes_remaining, and is_breached precomputed on every request object. FE reads those only.
+main.py and App.jsx are written at minute 15 with all routes/routers already registered, then frozen. They are the only two shared files, and they get frozen before the parallel sprint opens.
+FILE: SPDD.md
+SPDD — Smart Maintenance Request & Escalation System
+Codename: SENTINEL · Hospital Critical-Asset Edition · 180-minute build
+
+1. The 30-Second Pitch
+In a hospital, a maintenance ticket is not an inconvenience — it is a countdown timer attached to a patient. A ventilator alarm and a broken office chair cannot sit in the same queue with the same urgency.
+
+SENTINEL attaches a life-criticality SLA to every maintenance request at the moment it is created. An ICU ventilator gets 5 minutes. A vaccine fridge gets 10. Office HVAC gets 120. If a request is still open past its SLA, the system escalates it by itself — flips it to Escalated, writes an immutable escalation log, and routes it to the on-call biomedical technician. No human has to remember to chase it.
+
+The wow factor (this is what wins Functionality + Innovation):
+Every row in the admin queue has a ⏩ Simulate SLA breach button. The judge clicks it on the ICU ventilator ticket. The row backdates 6 minutes, the next poll lands, and live, on screen: the badge flips amber → red, the row starts pulsing, the countdown goes negative, and a new entry appears in the escalation timeline naming the on-call biomedical tech. Two seconds, no waiting, no faked video.
+
+Why our escalation design beats the obvious one: competitors will reach for a background scheduler (APScheduler / cron / Celery). Schedulers are invisible during a demo, add a dependency, add a failure mode, and cannot be proven to a judge in 2 minutes. We compute escalation on read — it is deterministic, stateless, zero-dependency, and demonstrable on command.
+
+2. Ruthless Scoping Matrix
+2.1 MUST-HAVE — exactly 3 features
+#	Feature	Definition of Done	Owners
+F1	Raise & Track — employee picks themselves from the header switcher, submits a request with category + priority, sees their own tickets with a live SLA countdown	POST /api/requests persists a row with sla_minutes auto-derived from category; GET /api/requests?employee_id= renders in EmployeeDashboard with a ticking countdown per row	Dev 1 + Dev 3
+F2	Admin Queue & Control — admin sees all tickets, filters by status/category, updates status, assigns a technician	PATCH /status and PATCH /assign both persist and re-render; assign auto-bumps Pending → In Progress	Dev 2 + Dev 4
+F3	Automatic SLA Escalation + Audit Trail — breached tickets self-escalate on read, write one escalation_logs row, and surface in a timeline; ⏩ button proves it live	evaluate_sla() runs inside every list/detail GET; exactly one log row per transition (never duplicates); EscalationTimeline shows reason + escalated_to	Dev 3 + Dev 2
+End-to-end proof (the graded MVP requirement):
+UserSwitcher → NewRequestForm → POST /api/requests → Postgres INSERT → AdminQueue GET → ⏩ age → evaluate_sla() → UPDATE requests + INSERT escalation_logs → red pulsing row + timeline entry. Frontend, backend, and database all touched in one unbroken path.
+
+2.2 EXPLICIT CUT LIST — DO NOT BUILD
+If you catch yourself starting any of these, stop and go help someone else integrate.
+
+Cut	Why it dies
+Real auth, JWT, sessions, bcrypt, login page, password column	45 min for 0 marks. The header dropdown + X-User-Id simulates identity completely.
+RBAC / permission middleware	The dropdown decides which page renders. That is the entire authorization model.
+Password reset, email verification	Out of scope by definition.
+Pagination, infinite scroll, virtualized tables	12 seeded rows. .map() is the pagination strategy.
+Email / SMS / push / WebSocket notifications	escalated_to is a text field. It says who would be paged. Judges accept this; it is a demo.
+File / photo uploads on tickets	Storage, multipart, CORS preflight, MIME validation. Instant 30-minute hole.
+Deep input validation, edge-case validators, regex rules	Pydantic type coercion + NOT NULL is the validation layer. Nothing more.
+Settings page, user profile page, dark mode toggle	Zero rubric weight. Ship one polished light theme.
+Unit/integration test suite, pytest, Vitest	Swagger click-through (Doc 3 §6) is our test suite.
+Alembic migrations	One hand-run .sql file.
+Repository pattern, service layer, DI container, ABCs, custom exception classes	One router file per domain. That is the architecture.
+Docker / docker-compose	uvicorn + npm run dev. Nothing to containerize in 3 hours.
+Charts / graphs on the dashboard	Four number cards from GET /api/stats. A chart library import costs more than it returns.
+3. Lean Architecture
+
+flowchart TD
+    subgraph FE["React 18 · Vite · Tailwind · :5173"]
+        US["UserSwitcher<br/>sets current_user_id"]
+        ED["EmployeeDashboard<br/>NewRequestForm"]
+        AQ["AdminQueue<br/>TicketTable · SlaCountdown<br/>EscalationTimeline"]
+        AX["api/client.js<br/>Axios + X-User-Id interceptor<br/>USE_MOCKS flag"]
+        US --> AX
+        ED --> AX
+        AQ --> AX
+        MK["api/mocks.js<br/>static fixtures"] -. "USE_MOCKS = true" .-> AX
+    end
+
+    AX -- "HTTP/JSON<br/>X-User-Id: n" --> API
+
+    subgraph BE["FastAPI · Uvicorn · :8000"]
+        API["main.py<br/>CORS allow_origins=*<br/>1 exception handler"]
+        R1["routers/requests.py<br/>POST · GET · GET/id · POST/age"]
+        R2["routers/admin.py<br/>PATCH status · PATCH assign<br/>GET escalations · employees · stats"]
+        ESC["escalation.py<br/>CATEGORY_SLA map<br/>evaluate_sla()"]
+        SCH["schemas.py · Pydantic v2"]
+        API --> R1
+        API --> R2
+        R1 --> ESC
+        R2 --> ESC
+        R1 --> SCH
+        R2 --> SCH
+    end
+
+    BE --> ORM["db.py + models.py<br/>SQLAlchemy 2.0 sync<br/>SessionLocal dependency"]
+
+    ORM -- "psycopg2 · Session Pooler :5432" --> PG[("Supabase Postgres<br/>RLS OFF · postgres role<br/>employees · requests · escalation_logs")]
+    ORM -. "DATABASE_URL=sqlite:///./dev.db<br/>FALLBACK — create_all() auto-builds schema" .-> LT[("SQLite dev.db")]
+
+    style PG fill:#065f46,color:#fff
+    style LT fill:#78350f,color:#fff
+    style ESC fill:#7f1d1d,color:#fff
+    style MK fill:#1e3a8a,color:#fff
+Two independent kill-switches, both one line:
+
+Database dies → DATABASE_URL=sqlite:///./dev.db in .env, restart uvicorn, python db/seed.py. Back in 40 seconds.
+Backend dies → USE_MOCKS = true in src/api/client.js. Frontend demo runs standalone.
+4. Locked Schema (verbatim — copy these names, never rename)
+
+employees
+  id            SERIAL PRIMARY KEY
+  name          TEXT NOT NULL
+  role          TEXT NOT NULL          -- 'employee' | 'admin' | 'technician'
+  department    TEXT
+
+requests
+  id            SERIAL PRIMARY KEY
+  employee_id   INTEGER NOT NULL REFERENCES employees(id)
+  title         TEXT NOT NULL
+  description   TEXT
+  category      TEXT NOT NULL
+  priority      TEXT NOT NULL DEFAULT 'Medium'
+  status        TEXT NOT NULL DEFAULT 'Pending'
+                -- Pending | In Progress | Resolved | Escalated
+  sla_minutes   INTEGER NOT NULL
+  assigned_to   INTEGER REFERENCES employees(id)
+  created_at    TIMESTAMP NOT NULL DEFAULT now()
+  updated_at    TIMESTAMP NOT NULL DEFAULT now()
+
+escalation_logs
+  id            SERIAL PRIMARY KEY
+  request_id    INTEGER NOT NULL REFERENCES requests(id)
+  from_status   TEXT NOT NULL
+  to_status     TEXT NOT NULL
+  reason        TEXT NOT NULL
+  escalated_to  TEXT
+  created_at    TIMESTAMP NOT NULL DEFAULT now()
+Three tables. No fourth table. No extra columns. Ever.
+
+5. Pinned Escalation Logic
+
+ESCALATE WHEN:
+    status NOT IN ('Resolved', 'Closed', 'Escalated')
+    AND (now() - created_at) > sla_minutes
+Category	sla_minutes	Escalates to (escalated_to)
+Life Support	5	Biomedical On-Call — Suresh Kumar
+Oxygen Supply	5	Biomedical On-Call — Suresh Kumar
+Cold Chain / Vaccine	10	Facility Admin — Vikram Nair
+ER Power	10	Electrical On-Call — Farah Sheikh
+IT / Network	60	Facility Admin — Vikram Nair
+Facilities / HVAC	120	Facility Admin — Vikram Nair
+Idempotency rule — memorize this: Escalated is excluded from the trigger condition. A row that is already Escalated is skipped, so a log row is written exactly once per transition. Without this exclusion every GET appends a duplicate log and the timeline becomes garbage within 30 seconds of the demo.
+
+evaluate_sla(db, rows) runs inside GET /api/requests, GET /api/requests/{id}, POST /api/requests/{id}/age, and GET /api/stats. It lives in exactly one file: escalation.py. Nothing else computes SLA.
+
+6. REST API Contract — complete and final
+Base URL: http://localhost:8000
+Every request sends: X-User-Id: <int> (from the header switcher) and Content-Type: application/json.
+Universal error shape — every non-2xx response, no exceptions:
+
+
+{ "error": "Request 99 not found" }
+6.1 Canonical RequestOut object
+Returned by every route that returns a request. Every key present on every response — no conditional keys.
+
+
+{
+  "id": 1,
+  "employee_id": 5,
+  "employee_name": "Priya Menon",
+  "title": "ICU Bed 4 ventilator alarm — low tidal volume",
+  "description": "Continuous low tidal volume alarm on Bed 4. Patient is vent-dependent.",
+  "category": "Life Support",
+  "priority": "Critical",
+  "status": "Escalated",
+  "sla_minutes": 5,
+  "assigned_to": 3,
+  "assigned_to_name": "Suresh Kumar",
+  "created_at": "2026-08-22T09:12:00",
+  "updated_at": "2026-08-22T09:34:11",
+  "age_minutes": 22,
+  "minutes_remaining": -17,
+  "is_breached": true
+}
+employee_name / assigned_to_name — server-side join. assigned_to and assigned_to_name are null when unassigned.
+age_minutes — integer, floor of (now - created_at) in minutes.
+minutes_remaining — sla_minutes - age_minutes. Goes negative. FE uses the sign for colour.
+is_breached — minutes_remaining < 0 AND status NOT IN ('Resolved','Closed').
+Timestamps are naive ISO-8601, no Z, no offset. FE must not parse them for math.
+6.2 GET /api/employees
+Populates the header switcher and the assign dropdown.
+
+Query: ?role=technician (optional)
+200:
+
+
+[
+  { "id": 1, "name": "Dr. Anita Rao",  "role": "admin",      "department": "Hospital Administration" },
+  { "id": 2, "name": "Vikram Nair",    "role": "admin",      "department": "Facility Management" },
+  { "id": 3, "name": "Suresh Kumar",   "role": "technician", "department": "Biomedical Engineering" },
+  { "id": 4, "name": "Farah Sheikh",   "role": "technician", "department": "Electrical & HVAC" },
+  { "id": 5, "name": "Priya Menon",    "role": "employee",   "department": "ICU — Ward 3" },
+  { "id": 6, "name": "Rahul Das",      "role": "employee",   "department": "Pathology Lab" }
+]
+6.3 POST /api/requests
+Headers: X-User-Id: 5 — required. This is the employee_id. Do not put employee_id in the body.
+
+Body:
+
+
+{
+  "title": "Central oxygen manifold pressure dropping in Ward 3",
+  "description": "Line pressure reading 2.8 bar, spec is 4.0 bar. Two patients on O2.",
+  "category": "Oxygen Supply",
+  "priority": "Critical"
+}
+Field	Type	Required	Rule
+title	string	yes	non-empty
+description	string	no	defaults ""
+category	string	yes	must be a key in CATEGORY_SLA
+priority	string	no	Low|Medium|High|Critical, default Medium
+Server sets: employee_id ← X-User-Id; sla_minutes ← CATEGORY_SLA[category]; status ← Pending; created_at/updated_at ← now().
+
+201: full RequestOut (status: "Pending", is_breached: false).
+
+Code	Condition	Body
+400	X-User-Id header missing/non-integer	{"error": "X-User-Id header is required"}
+400	unknown category	{"error": "Unknown category 'Plumbing'. Allowed: Life Support, Oxygen Supply, Cold Chain / Vaccine, ER Power, IT / Network, Facilities / HVAC"}
+404	X-User-Id not in employees	{"error": "Employee 99 not found"}
+422	Pydantic type failure	{"error": "title: Field required"}
+6.4 GET /api/requests
+Runs evaluate_sla() over the result set before serializing. This is where auto-escalation happens.
+
+Query params — all optional, AND-combined:
+
+Param	Example	Meaning
+status	?status=Escalated	exact match
+category	?category=Life Support	exact match
+employee_id	?employee_id=5	requester's own tickets (Employee Dashboard)
+assigned_to	?assigned_to=3	technician's queue
+Sort order (fixed, non-negotiable): is_breached DESC, then priority (Critical > High > Medium > Low), then created_at ASC. Breached life-support tickets are always row 1. This is a UI/UX mark.
+
+200: [ RequestOut, ... ] — [] when nothing matches (200, never 404).
+
+6.5 GET /api/requests/{id}
+Runs evaluate_sla() on the single row. Detail drawer / timeline header.
+
+200: RequestOut
+404: {"error": "Request 99 not found"}
+
+6.6 POST /api/requests/{id}/age?minutes=N ⭐ DEMO ENDPOINT
+Backdates created_at by N minutes, then immediately runs evaluate_sla() on that row so the response already reflects the escalation. One round trip, instant visual change.
+
+Query: minutes — integer, required, 1 … 10080.
+Body: none.
+
+200:
+
+
+{
+  "id": 4,
+  "employee_id": 5,
+  "employee_name": "Priya Menon",
+  "title": "Central oxygen manifold pressure dropping in Ward 3",
+  "description": "Line pressure reading 2.8 bar, spec is 4.0 bar. Two patients on O2.",
+  "category": "Oxygen Supply",
+  "priority": "Critical",
+  "status": "Escalated",
+  "sla_minutes": 5,
+  "assigned_to": null,
+  "assigned_to_name": null,
+  "created_at": "2026-08-22T09:26:00",
+  "updated_at": "2026-08-22T09:32:04",
+  "age_minutes": 6,
+  "minutes_remaining": -1,
+  "is_breached": true
+}
+Code	Condition
+400	minutes missing or < 1 → {"error": "minutes must be between 1 and 10080"}
+404	request not found
+6.7 PATCH /api/requests/{id}/status
+Body:
+
+
+{ "status": "In Progress" }
+Allowed: Pending | In Progress | Resolved | Escalated | Closed.
+
+Side effects:
+
+always sets updated_at = now()
+status == "Escalated" (manual flag) → writes an escalation_logs row: reason = "Manual escalation by <name of X-User-Id>", escalated_to = ESCALATION_TARGET[category]
+Resolved / Closed → row permanently exits SLA evaluation
+200: RequestOut
+400: {"error": "Invalid status 'Done'. Allowed: Pending, In Progress, Resolved, Escalated, Closed"}
+404: {"error": "Request 99 not found"}
+
+6.8 PATCH /api/requests/{id}/assign
+Body:
+
+
+{ "assigned_to": 3 }
+null unassigns.
+
+Side effect (Innovation mark): if current status == "Pending" and assigned_to is not null, status auto-bumps to In Progress. Assigning is acknowledging — one click instead of two.
+
+200: RequestOut
+404: {"error": "Request 99 not found"} or {"error": "Employee 99 not found"}
+400: {"error": "assigned_to must reference an employee with role technician or admin"}
+
+6.9 GET /api/escalations
+Query: ?request_id=1 (optional — powers the per-ticket EscalationTimeline)
+Order: created_at DESC (newest first).
+
+200:
+
+
+[
+  {
+    "id": 3,
+    "request_id": 1,
+    "request_title": "ICU Bed 4 ventilator alarm — low tidal volume",
+    "category": "Life Support",
+    "from_status": "Escalated",
+    "to_status": "Escalated",
+    "reason": "Manual flag by Dr. Anita Rao — patient is vent-dependent, no acknowledgement in 15 min",
+    "escalated_to": "Chief Medical Officer",
+    "created_at": "2026-08-22T09:34:11"
+  },
+  {
+    "id": 1,
+    "request_id": 1,
+    "request_title": "ICU Bed 4 ventilator alarm — low tidal volume",
+    "category": "Life Support",
+    "from_status": "Pending",
+    "to_status": "Escalated",
+    "reason": "SLA breach — 22 min elapsed against a 5 min SLA (Life Support)",
+    "escalated_to": "Biomedical On-Call — Suresh Kumar",
+    "created_at": "2026-08-22T09:19:02"
+  }
+]
+6.10 GET /api/stats
+Runs evaluate_sla() across all open rows first, so the cards are never stale.
+
+200:
+
+
+{
+  "total": 12,
+  "pending": 4,
+  "in_progress": 3,
+  "resolved": 3,
+  "escalated": 2,
+  "critical_open": 3,
+  "breached_open": 2,
+  "breach_rate_pct": 16.7
+}
+critical_open = priority == 'Critical' AND status NOT IN ('Resolved','Closed').
+breach_rate_pct = round(escalated / total * 100, 1); 0.0 when total == 0.
+
+6.11 Status-code summary
+Code	Used for
+200	successful GET / PATCH / age
+201	request created
+400	bad header, bad enum value, bad query param
+404	request or employee id not found
+422	Pydantic body validation failure (reshaped to {"error": ...})
+500	anything unexpected — {"error": "Internal server error"}
+7. Rubric Attack Map
+Criterion	Weight	How we bank it
+Functionality	40%	Full loop demoed end-to-end, plus escalation proven live rather than described
+Code Quality	20%	One router per domain, one escalation.py owning SLA logic, one exception handler, zero duplicated business logic, contract-first mock layer
+UI/UX	20%	Breach-first sort, ticking countdown, pulsing red critical rows, colour-coded badges, 4 stat cards, responsive grid
+Innovation	10%	Category-derived SLA tiers, compute-on-read escalation (no scheduler), assign-auto-acknowledges, the ⏩ time-machine endpoint
+Presentation	10%	Rehearsed 2-minute click path (Doc 5 §7) ending on the live breach; architecture diagram on screen
