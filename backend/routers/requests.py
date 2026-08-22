@@ -1,3 +1,4 @@
+# backend/routers/requests.py — OWNER: Dev 3
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -5,38 +6,27 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from models import Request as RequestModel, Employee
-from schemas import RequestCreate, RequestOut
-from escalation import CATEGORY_SLA, evaluate_sla, serialize_request, sort_requests
+from schemas import RequestCreate
+from escalation import CATEGORY_SLA, evaluate_sla, enrich, sort_rows
 
-router = APIRouter(prefix="/api/requests", tags=["requests"])
-
-
-def require_user_id(x_user_id: Optional[str] = Header(default=None, alias="X-User-Id")) -> int:
-    if x_user_id is None or not x_user_id.strip().lstrip("-").isdigit():
-        raise HTTPException(status_code=400, detail="X-User-Id header is required")
-    return int(x_user_id)
+router = APIRouter()
 
 
-@router.post("", response_model=RequestOut, status_code=201)
+@router.post("/requests", status_code=201)
 def create_request(
     payload: RequestCreate,
+    x_user_id: int = Header(..., alias="X-User-Id"),
     db: Session = Depends(get_db),
-    user_id: int = Depends(require_user_id),
 ):
     if payload.category not in CATEGORY_SLA:
-        allowed = ", ".join(CATEGORY_SLA.keys())
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown category '{payload.category}'. Allowed: {allowed}",
-        )
-
-    employee = db.query(Employee).filter(Employee.id == user_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail=f"Employee {user_id} not found")
+        raise HTTPException(400, f"Unknown category '{payload.category}'. "
+                                 f"Allowed: {', '.join(CATEGORY_SLA)}")
+    if not db.get(Employee, x_user_id):
+        raise HTTPException(404, f"Employee {x_user_id} not found")
 
     now = datetime.utcnow()
     row = RequestModel(
-        employee_id=user_id,
+        employee_id=x_user_id,
         title=payload.title,
         description=payload.description or "",
         category=payload.category,
@@ -50,10 +40,10 @@ def create_request(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return serialize_request(db, row)
+    return enrich(row)
 
 
-@router.get("", response_model=list[RequestOut])
+@router.get("/requests")
 def list_requests(
     status: Optional[str] = Query(default=None),
     category: Optional[str] = Query(default=None),
@@ -71,37 +61,31 @@ def list_requests(
     if assigned_to is not None:
         q = q.filter(RequestModel.assigned_to == assigned_to)
     rows = q.all()
-
     evaluate_sla(db, rows)
-    rows = sort_requests(rows)
-    return [serialize_request(db, r) for r in rows]
+    rows = sort_rows(rows)
+    return [enrich(r) for r in rows]
 
 
-@router.get("/{request_id}", response_model=RequestOut)
+@router.get("/requests/{request_id}")
 def get_request(request_id: int, db: Session = Depends(get_db)):
-    row = db.query(RequestModel).filter(RequestModel.id == request_id).first()
+    row = db.get(RequestModel, request_id)
     if not row:
-        raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
+        raise HTTPException(404, f"Request {request_id} not found")
     evaluate_sla(db, [row])
-    return serialize_request(db, row)
+    return enrich(row)
 
 
-@router.post("/{request_id}/age", response_model=RequestOut)
+@router.post("/requests/{request_id}/age")
 def age_request(
     request_id: int,
-    minutes: Optional[int] = Query(default=None),
+    minutes: int = Query(..., ge=1, le=10080, description="Backdate created_at by N minutes"),
     db: Session = Depends(get_db),
 ):
-    if minutes is None or minutes < 1 or minutes > 10080:
-        raise HTTPException(status_code=400, detail="minutes must be between 1 and 10080")
-
-    row = db.query(RequestModel).filter(RequestModel.id == request_id).first()
+    row = db.get(RequestModel, request_id)
     if not row:
-        raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
-
+        raise HTTPException(404, f"Request {request_id} not found")
     row.created_at = row.created_at - timedelta(minutes=minutes)
     db.commit()
-    db.refresh(row)
-
     evaluate_sla(db, [row])
-    return serialize_request(db, row)
+    db.refresh(row)
+    return enrich(row)

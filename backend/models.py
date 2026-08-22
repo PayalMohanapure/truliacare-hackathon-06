@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, Text, TIMESTAMP, ForeignKey, func
+from sqlalchemy.orm import relationship
 from db import Base
 
 
@@ -25,6 +26,9 @@ class Request(Base):
     assigned_to = Column(Integer, ForeignKey("employees.id"))
     created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
+
+    employee = relationship("Employee", foreign_keys=[employee_id])
+    assignee = relationship("Employee", foreign_keys=[assigned_to])
 
 
 class EscalationLog(Base):
