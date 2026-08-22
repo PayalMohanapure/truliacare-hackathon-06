@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from db import get_db
 from models import Request as RequestModel, Employee
 from schemas import RequestCreate
-from escalation import CATEGORY_SLA, evaluate_sla, enrich, sort_rows
+from escalation import CATEGORY_SLA, evaluate_sla, enrich, sort_rows, try_backup_swap
 
 router = APIRouter()
 
@@ -40,6 +40,11 @@ def create_request(
     db.add(row)
     db.commit()
     db.refresh(row)
+
+    if try_backup_swap(db, row, reason=f"Backup unit assigned at intake for {row.category}"):
+        db.commit()
+        db.refresh(row)
+
     return enrich(row)
 
 

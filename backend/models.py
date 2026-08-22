@@ -24,11 +24,13 @@ class Request(Base):
     status = Column(Text, nullable=False, default="Pending")
     sla_minutes = Column(Integer, nullable=False)
     assigned_to = Column(Integer, ForeignKey("employees.id"))
+    equipment_id = Column(Integer, ForeignKey("equipment.id"))
     created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
 
     employee = relationship("Employee", foreign_keys=[employee_id])
     assignee = relationship("Employee", foreign_keys=[assigned_to])
+    equipment = relationship("Equipment", foreign_keys=[equipment_id])
 
 
 class EscalationLog(Base):
@@ -40,4 +42,25 @@ class EscalationLog(Base):
     to_status = Column(Text, nullable=False)
     reason = Column(Text, nullable=False)
     escalated_to = Column(Text)
+    created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
+
+
+class Equipment(Base):
+    __tablename__ = "equipment"
+
+    id = Column(Integer, primary_key=True)
+    category = Column(Text, nullable=False)
+    label = Column(Text, nullable=False)
+    status = Column(Text, nullable=False, default="Active")  # Active | Damaged | In Repair | Spare
+    department = Column(Text)
+
+
+class SwapLog(Base):
+    __tablename__ = "swap_logs"
+
+    id = Column(Integer, primary_key=True)
+    request_id = Column(Integer, ForeignKey("requests.id"), nullable=False)
+    damaged_equipment_id = Column(Integer, ForeignKey("equipment.id"), nullable=False)
+    spare_equipment_id = Column(Integer, ForeignKey("equipment.id"), nullable=False)
+    reason = Column(Text, nullable=False)
     created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from db import get_db
-from models import Request as RequestModel, Employee, EscalationLog
+from models import Request as RequestModel, Employee, EscalationLog, Equipment, SwapLog
 from schemas import EmployeeOut, StatusUpdate, AssignUpdate
 from escalation import ESCALATION_TARGET, evaluate_sla, enrich, TERMINAL
 
@@ -91,6 +91,32 @@ def list_escalations(request_id: Optional[int] = Query(default=None), db: Sessio
             "to_status": log.to_status,
             "reason": log.reason,
             "escalated_to": log.escalated_to,
+            "created_at": log.created_at.isoformat(timespec="seconds") if log.created_at else None,
+        }
+        for log in logs
+    ]
+
+
+@router.get("/swaps")
+def list_swaps(request_id: Optional[int] = Query(default=None), db: Session = Depends(get_db)):
+    q = db.query(SwapLog)
+    if request_id is not None:
+        q = q.filter(SwapLog.request_id == request_id)
+    logs = q.order_by(SwapLog.created_at.desc()).all()
+
+    req_map = {r.id: r for r in db.query(RequestModel).all()}
+    labels = {e.id: e.label for e in db.query(Equipment).all()}
+    return [
+        {
+            "id": log.id,
+            "request_id": log.request_id,
+            "request_title": req_map[log.request_id].title if log.request_id in req_map else "",
+            "category": req_map[log.request_id].category if log.request_id in req_map else "",
+            "damaged_equipment_id": log.damaged_equipment_id,
+            "damaged_equipment_label": labels.get(log.damaged_equipment_id),
+            "spare_equipment_id": log.spare_equipment_id,
+            "spare_equipment_label": labels.get(log.spare_equipment_id),
+            "reason": log.reason,
             "created_at": log.created_at.isoformat(timespec="seconds") if log.created_at else None,
         }
         for log in logs

@@ -2,14 +2,16 @@ from datetime import datetime, timedelta
 
 from db import Base, engine, SessionLocal
 import models
-from models import Employee, Request, EscalationLog
+from models import Employee, Request, EscalationLog, Equipment, SwapLog
 
 Base.metadata.create_all(bind=engine)
 
 db = SessionLocal()
 
+db.query(SwapLog).delete()
 db.query(EscalationLog).delete()
 db.query(Request).delete()
+db.query(Equipment).delete()
 db.query(Employee).delete()
 db.commit()
 
@@ -32,15 +34,27 @@ def ago(mins):
     return now - timedelta(minutes=mins)
 
 
+EQUIPMENT = [
+    dict(id=1, category="Life Support", label="Ventilator VT-04", status="Damaged", department="ICU — Ward 3"),
+    dict(id=2, category="Life Support", label="Ventilator VT-09 (Spare)", status="Spare", department="Biomedical Store"),
+    dict(id=3, category="Oxygen Supply", label="O2 Manifold — Ward 3", status="Damaged", department="ICU — Ward 3"),
+    dict(id=4, category="Oxygen Supply", label="O2 Manifold — Spare Unit", status="Spare", department="Biomedical Store"),
+    dict(id=5, category="Cold Chain / Vaccine", label="Vaccine Fridge #2", status="Damaged", department="Pathology Lab"),
+    dict(id=6, category="Cold Chain / Vaccine", label="Vaccine Fridge #5 (Spare)", status="Spare", department="Biomedical Store"),
+]
+for eq in EQUIPMENT:
+    db.add(Equipment(**eq))
+db.commit()
+
 REQUESTS = [
     dict(id=1, employee_id=5, title="ICU Bed 4 ventilator alarm — low tidal volume",
          description="Continuous low tidal volume alarm on Bed 4. Patient is vent-dependent.",
          category="Life Support", priority="Critical", status="Escalated",
-         sla_minutes=5, assigned_to=3, age=22),
+         sla_minutes=5, assigned_to=3, equipment_id=1, age=22),
     dict(id=2, employee_id=6, title="Vaccine fridge #2 temperature drift — reading +8°C",
          description="Cold chain unit 2 holding at +8°C against a +2 to +8 spec ceiling. ~400 doses at risk.",
          category="Cold Chain / Vaccine", priority="Critical", status="Escalated",
-         sla_minutes=10, assigned_to=None, age=35),
+         sla_minutes=10, assigned_to=None, equipment_id=5, age=35),
     dict(id=3, employee_id=5, title="ER backup generator fails auto-transfer test",
          description="Weekly ATS test did not transfer load. ER on utility power only.",
          category="ER Power", priority="Critical", status="In Progress",
@@ -48,7 +62,7 @@ REQUESTS = [
     dict(id=4, employee_id=5, title="Central oxygen manifold pressure dropping in Ward 3",
          description="Line pressure 2.8 bar against a 4.0 bar spec. Two patients on O2.",
          category="Oxygen Supply", priority="Critical", status="Pending",
-         sla_minutes=5, assigned_to=None, age=1),
+         sla_minutes=5, assigned_to=None, equipment_id=3, age=1),
     dict(id=5, employee_id=5, title="OT-2 surgical lighting flickers mid-procedure",
          description="Overhead surgical lamp in Operating Theatre 2 flickering under load.",
          category="Facilities / HVAC", priority="High", status="In Progress",
@@ -113,7 +127,7 @@ db.commit()
 # this, the next auto-generated insert collides with a seeded row's id.
 if db.bind.dialect.name == "postgresql":
     from sqlalchemy import text
-    for table in ("employees", "requests", "escalation_logs"):
+    for table in ("employees", "equipment", "requests", "escalation_logs", "swap_logs"):
         db.execute(text(
             f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
             f"COALESCE((SELECT MAX(id) FROM {table}), 1), true)"
@@ -121,4 +135,4 @@ if db.bind.dialect.name == "postgresql":
     db.commit()
 
 db.close()
-print("Seed complete: 6 employees, 12 requests, 3 escalation logs.")
+print("Seed complete: 6 employees, 6 equipment units, 12 requests, 3 escalation logs.")
