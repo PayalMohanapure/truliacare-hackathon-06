@@ -1,6 +1,9 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
+
+Status = Literal["Pending", "In Progress", "Resolved", "Escalated", "Closed"]
+Priority = Literal["Low", "Medium", "High", "Critical"]
 
 
 class EmployeeOut(BaseModel):
@@ -8,20 +11,18 @@ class EmployeeOut(BaseModel):
     name: str
     role: str
     department: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class RequestCreate(BaseModel):
-    title: str = Field(..., min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=200)
     description: Optional[str] = ""
     category: str
-    priority: Optional[str] = "Medium"
+    priority: Priority = "Medium"
 
 
 class StatusUpdate(BaseModel):
-    status: str
+    status: Status
 
 
 class AssignUpdate(BaseModel):
@@ -40,8 +41,8 @@ class RequestOut(BaseModel):
     sla_minutes: int
     assigned_to: Optional[int] = None
     assigned_to_name: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: str
+    updated_at: str
     age_minutes: int
     minutes_remaining: int
     is_breached: bool
@@ -56,10 +57,8 @@ class EscalationOut(BaseModel):
     to_status: str
     reason: str
     escalated_to: Optional[str] = None
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
+    created_at: str
+    model_config = {"from_attributes": True}
 
 
 class StatsOut(BaseModel):

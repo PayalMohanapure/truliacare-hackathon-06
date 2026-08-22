@@ -8,7 +8,7 @@ from models import Request as RequestModel, Employee
 from schemas import RequestCreate, RequestOut
 from escalation import CATEGORY_SLA, evaluate_sla, serialize_request, sort_requests
 
-router = APIRouter(prefix="/api/requests", tags=["requests"])
+router = APIRouter()
 
 
 def require_user_id(x_user_id: Optional[str] = Header(default=None, alias="X-User-Id")) -> int:
@@ -17,7 +17,7 @@ def require_user_id(x_user_id: Optional[str] = Header(default=None, alias="X-Use
     return int(x_user_id)
 
 
-@router.post("", response_model=RequestOut, status_code=201)
+@router.post("/requests", status_code=201)
 def create_request(
     payload: RequestCreate,
     db: Session = Depends(get_db),
@@ -53,7 +53,7 @@ def create_request(
     return serialize_request(db, row)
 
 
-@router.get("", response_model=list[RequestOut])
+@router.get("/requests")
 def list_requests(
     status: Optional[str] = Query(default=None),
     category: Optional[str] = Query(default=None),
@@ -77,7 +77,7 @@ def list_requests(
     return [serialize_request(db, r) for r in rows]
 
 
-@router.get("/{request_id}", response_model=RequestOut)
+@router.get("/requests/{request_id}")
 def get_request(request_id: int, db: Session = Depends(get_db)):
     row = db.query(RequestModel).filter(RequestModel.id == request_id).first()
     if not row:
@@ -86,7 +86,7 @@ def get_request(request_id: int, db: Session = Depends(get_db)):
     return serialize_request(db, row)
 
 
-@router.post("/{request_id}/age", response_model=RequestOut)
+@router.post("/requests/{request_id}/age")
 def age_request(
     request_id: int,
     minutes: Optional[int] = Query(default=None),
