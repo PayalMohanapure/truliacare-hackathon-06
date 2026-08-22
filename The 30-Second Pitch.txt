@@ -1,0 +1,9 @@
+1. The 30-Second Pitch
+In a hospital, a maintenance ticket is not an inconvenience — it is a countdown timer attached to a patient. A ventilator alarm and a broken office chair cannot sit in the same queue with the same urgency.
+
+SENTINEL attaches a life-criticality SLA to every maintenance request at the moment it is created. An ICU ventilator gets 5 minutes. A vaccine fridge gets 10. Office HVAC gets 120. If a request is still open past its SLA, the system escalates it by itself — flips it to Escalated, writes an immutable escalation log, and routes it to the on-call biomedical technician. No human has to remember to chase it.
+
+The wow factor (this is what wins Functionality + Innovation):
+Every row in the admin queue has a ⏩ Simulate SLA breach button. The judge clicks it on the ICU ventilator ticket. The row backdates 6 minutes, the next poll lands, and live, on screen: the badge flips amber → red, the row starts pulsing, the countdown goes negative, and a new entry appears in the escalation timeline naming the on-call biomedical tech. Two seconds, no waiting, no faked video.
+
+Why our escalation design beats the obvious one: competitors will reach for a background scheduler (APScheduler / cron / Celery). Schedulers are invisible during a demo, add a dependency, add a failure mode, and cannot be proven to a judge in 2 minutes. We compute escalation on read — it is deterministic, stateless, zero-dependency, and demonstrable on command.
