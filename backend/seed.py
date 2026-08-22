@@ -108,5 +108,17 @@ for log in ESCALATIONS:
     db.add(EscalationLog(**log, created_at=ago(age)))
 db.commit()
 
+# Explicit ids above don't advance Postgres's SERIAL sequences (SQLite has no
+# such issue — it derives the next rowid from MAX(id) automatically). Without
+# this, the next auto-generated insert collides with a seeded row's id.
+if db.bind.dialect.name == "postgresql":
+    from sqlalchemy import text
+    for table in ("employees", "requests", "escalation_logs"):
+        db.execute(text(
+            f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+            f"COALESCE((SELECT MAX(id) FROM {table}), 1), true)"
+        ))
+    db.commit()
+
 db.close()
 print("Seed complete: 6 employees, 12 requests, 3 escalation logs.")
