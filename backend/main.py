@@ -1,3 +1,4 @@
+# backend/main.py — OWNER: Dev 4. FROZEN AT MINUTE 15. Nobody edits this after that.
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -5,18 +6,20 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from db import Base, engine
-import models  # noqa: F401 — registers models on Base before create_all
+import models  # noqa: F401 — registers tables on Base
 from routers import requests as requests_router
 from routers import admin as admin_router
 
+# Postgres: no-op (tables already created by 001_init.sql).
+# SQLite fallback: builds the whole schema. This one line IS the fallback mechanism.
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SENTINEL — Hospital Maintenance & Escalation", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["*"],       # hackathon. X-User-Id is a custom header —
+    allow_credentials=False,   # allow_headers=["*"] is what makes the preflight pass.
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -52,3 +55,4 @@ def root():
 @app.get("/health", tags=["meta"])
 def health():
     return {"status": "ok"}
+

@@ -1,34 +1,32 @@
-from datetime import datetime, timezone
+# backend/escalation.py — OWNER: Dev 3
+# The single source of truth for SLA. Nothing else in the codebase computes escalation.
+from datetime import datetime
 from sqlalchemy.orm import Session, object_session
 from models import Request, EscalationLog, Employee
 
 CATEGORY_SLA = {
-    "Life Support": 5,
-    "Oxygen Supply": 5,
+    "Life Support":         5,
+    "Oxygen Supply":        5,
     "Cold Chain / Vaccine": 10,
-    "ER Power": 10,
-    "IT / Network": 60,
-    "Facilities / HVAC": 120,
+    "ER Power":             10,
+    "IT / Network":         60,
+    "Facilities / HVAC":    120,
 }
 
 ESCALATION_TARGET = {
-    "Life Support": "Biomedical On-Call — Suresh Kumar",
-    "Oxygen Supply": "Biomedical On-Call — Suresh Kumar",
+    "Life Support":         "Biomedical On-Call — Suresh Kumar",
+    "Oxygen Supply":        "Biomedical On-Call — Suresh Kumar",
     "Cold Chain / Vaccine": "Facility Admin — Vikram Nair",
-    "ER Power": "Electrical On-Call — Farah Sheikh",
-    "IT / Network": "Facility Admin — Vikram Nair",
-    "Facilities / HVAC": "Facility Admin — Vikram Nair",
+    "ER Power":             "Electrical On-Call — Farah Sheikh",
+    "IT / Network":         "Facility Admin — Vikram Nair",
+    "Facilities / HVAC":    "Facility Admin — Vikram Nair",
 }
 
 TERMINAL = ("Resolved", "Closed")
 CLOSED_STATUSES = TERMINAL
 
-PRIORITY_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
-PRIORITY_RANK = PRIORITY_ORDER
-
-
-def _now():
-    return datetime.utcnow()
+PRIORITY_RANK = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+PRIORITY_ORDER = PRIORITY_RANK
 
 
 def age_minutes(row: Request) -> int:
@@ -36,36 +34,39 @@ def age_minutes(row: Request) -> int:
 
 
 def evaluate_sla(db: Session, rows: list[Request]) -> list[Request]:
-    """Compute-on-read escalation. Mutates rows in place and writes exactly
-    one escalation_logs row per Pending/In Progress -> Escalated transition."""
-    now = _now()
-    dirty = False
-    for r in rows:
-        if r.status in TERMINAL or r.status == "Escalated":
+    """Flip newly-breached rows to Escalated and log it. Commits once.
+
+    IDEMPOTENCY: 'Escalated' is in the skip set, so a row that is already
+    escalated is never re-logged. Exactly one log row per transition.
+    """
+    changed = False
+    now = datetime.utcnow()
+    for row in rows:
+        if row.status in TERMINAL or row.status == "Escalated":
             continue
-        age = age_minutes(r)
-        if age > r.sla_minutes:
-            old_status = r.status
-            r.status = "Escalated"
-            r.updated_at = now
+        age = age_minutes(row)
+        if age > row.sla_minutes:
             db.add(EscalationLog(
-                request_id=r.id,
-                from_status=old_status,
+                request_id=row.id,
+                from_status=row.status,
                 to_status="Escalated",
-                reason=f"SLA breach — {age} min elapsed against a {r.sla_minutes} min SLA ({r.category})",
-                escalated_to=ESCALATION_TARGET.get(r.category, "Facility Admin"),
+                reason=(f"SLA breach — {age} min elapsed against a "
+                        f"{row.sla_minutes} min SLA ({row.category})"),
+                escalated_to=ESCALATION_TARGET.get(row.category, "Facility Admin"),
                 created_at=now,
             ))
-            dirty = True
-    if dirty:
+            row.status = "Escalated"
+            row.updated_at = now
+            changed = True
+    if changed:
         db.commit()
-        for r in rows:
-            db.refresh(r)
+        for row in rows:
+            db.refresh(row)
     return rows
 
 
 def enrich(row: Request, db: Session = None) -> dict:
-    """ORM row -> exact RequestOut dict. Every key present, ISO string dates."""
+    """ORM row -> the exact RequestOut dict. Every key, always present."""
     if db is None:
         db = object_session(row)
 
@@ -114,19 +115,14 @@ def serialize_request(db: Session, r: Request) -> dict:
     return enrich(r, db=db)
 
 
-def sort_requests(rows: list[Request]) -> list[Request]:
-    def key(r: Request):
-        age = age_minutes(r)
-        remaining = r.sla_minutes - age
-        is_breached = remaining < 0 and r.status not in TERMINAL
-        return (
-            0 if is_breached else 1,
-            PRIORITY_ORDER.get(r.priority, 4),
-            r.created_at,
-        )
-
-    return sorted(rows, key=key)
+def sort_rows(rows: list[Request]) -> list[Request]:
+    """Breached first, then by priority, then oldest first."""
+    return sorted(rows, key=lambda r: (
+        not (r.sla_minutes - age_minutes(r) < 0 and r.status not in TERMINAL),
+        PRIORITY_RANK.get(r.priority, 9),
+        r.created_at,
+    ))
 
 
-sort_rows = sort_requests
+sort_requests = sort_rows
 
