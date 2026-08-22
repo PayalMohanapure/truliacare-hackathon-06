@@ -9,6 +9,7 @@ from db import Base, engine
 import models  # noqa: F401 — registers tables on Base
 from routers import requests as requests_router
 from routers import admin as admin_router
+from routers import ai as ai_router
 
 # Postgres: no-op (tables already created by 001_init.sql).
 # SQLite fallback: builds the whole schema. This one line IS the fallback mechanism.
@@ -45,6 +46,7 @@ async def unhandled(_: Request, exc: Exception):
 
 app.include_router(requests_router.router, prefix="/api", tags=["requests"])
 app.include_router(admin_router.router, prefix="/api", tags=["admin"])
+app.include_router(ai_router.router, prefix="/api", tags=["ai"])
 
 
 @app.get("/")
