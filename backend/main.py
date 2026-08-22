@@ -45,3 +45,9 @@ app.include_router(admin_router.router)
 @app.get("/")
 def root():
     return {"status": "ok", "service": "SENTINEL"}
+
+
+@app.get("/health", tags=["meta"])
+def health():
+    return {"status": "ok"}
+
