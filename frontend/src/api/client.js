@@ -76,3 +76,21 @@ export async function getStats() {
   if (USE_MOCKS) { await delay(); return mocks.mockStats(); }
   return (await http.get("/api/stats")).data;
 }
+
+// ── AI AGENT ──────────────────────────────────────────────────
+export async function aiAnalyze(description) {
+  return (await http.post("/api/ai/analyze", { description })).data;
+}
+
+export async function aiSuggestAssignee(category, priority) {
+  return (await http.post("/api/ai/suggest-assignee", { category, priority })).data;
+}
+
+export async function aiChat(message, context = null) {
+  return (await http.post("/api/ai/chat", { message, context })).data;
+}
+
+export async function aiSuggestEscalation(request) {
+  return (await http.post("/api/ai/suggest-escalation", request)).data;
+}
+// ─────────────────────────────────────────────────────────────

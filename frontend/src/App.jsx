@@ -3,6 +3,7 @@ import { Routes, Route } from "react-router-dom";
 import Header from "./layout/Header";
 import EmployeeDashboard from "./pages/EmployeeDashboard";
 import AdminQueue from "./pages/AdminQueue";
+import AgentChat from "./pages/AgentChat";
 import { getEmployees, setCurrentUser as setApiUser } from "./api/client";
 
 export default function App() {
@@ -31,6 +32,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<EmployeeDashboard currentUser={currentUser} />} />
         <Route path="/admin" element={<AdminQueue employees={employees} />} />
+        <Route path="/agent" element={<AgentChat currentUser={currentUser} />} />
       </Routes>
     </div>
   );

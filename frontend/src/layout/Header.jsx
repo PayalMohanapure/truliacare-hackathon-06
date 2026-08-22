@@ -18,6 +18,9 @@ export default function Header({ currentUser, employees, onUserChange }) {
         <nav className="flex items-center gap-1">
           <Link to="/" className={navClass(pathname === "/")}>My Requests</Link>
           <Link to="/admin" className={navClass(pathname === "/admin")}>Admin Queue</Link>
+          <Link to="/agent" className={navClass(pathname === "/agent")}>
+            🤖 AI Agent
+          </Link>
         </nav>
       </div>
       {employees.length > 0 && (
